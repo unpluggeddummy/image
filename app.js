@@ -213,7 +213,7 @@
     if (!im) { el.style.backgroundImage = ''; return; }
     const W = el.clientWidth, H = el.clientHeight;
     if (!W || !H) return;
-    const base = el._fit === 'contain' ? Math.min(W / im.w, H / im.h) : Math.max(W / im.w, H / im.h);
+    const base = (im.fit || el._fit) === 'contain' ? Math.min(W / im.w, H / im.h) : Math.max(W / im.w, H / im.h);
     const s = base * im.z;
     el.style.backgroundImage = `url("${im.src}")`;
     el.style.backgroundSize = `${im.w * s}px ${im.h * s}px`;
@@ -230,27 +230,38 @@
     const im = get();
 
     const setFile = async (file) => {
-      try { set(await loadImageFile(file)); touch(); render(); }
+      try {
+        const old = get(); const nim = await loadImageFile(file);
+        if (old) { if (old.cr) nim.cr = old.cr; if (old.fit) nim.fit = old.fit; }
+        set(nim); touch(); render();
+      }
       catch (e) { toast(e.message); }
     };
 
     if (!im) {
       el.classList.add('empty');
-      el.append(h('div', 'ph', { text: '+ ' + label }));
+      el.append(h('div', 'ph', { text: '+ ' + label + '\n클릭 · 끌어놓기 · 붙여넣기' }));
       el.addEventListener('click', async () => { const f = await pickImage(); if (f) setFile(f); });
     } else {
       el.classList.add('has');
-      if (fit === 'contain') el.classList.add('transparent');
+      const curFit = () => im.fit || fit;
+      if (curFit() === 'contain') el.classList.add('transparent');
       const tools = h('div', 'tools ctl');
       const zoom = (f) => {
-        const min = fit === 'contain' ? 0.4 : 1;
+        const min = curFit() === 'contain' ? 0.4 : 1;
         im.z = Math.max(min, Math.min(5, +(im.z * f).toFixed(3)));
         applyImg(el); touch();
       };
       tools.append(
         h('button', '', { text: '－', title: '축소', onclick: e => { e.stopPropagation(); zoom(1 / 1.12); } }),
         h('button', '', { text: '＋', title: '확대', onclick: e => { e.stopPropagation(); zoom(1.12); } }),
+        h('button', '', { text: curFit() === 'contain' ? '채우기' : '전체', title: curFit() === 'contain' ? '칸에 꽉 채우기 (넘치는 부분은 잘림)' : '잘리지 않게 사진 전체 보이기', onclick: e => { e.stopPropagation(); im.fit = curFit() === 'contain' ? 'cover' : 'contain'; im.x = 50; im.y = 50; im.z = 1; touch(); render(); } }),
         h('button', '', { text: '맞춤', title: '위치·크기 초기화', onclick: e => { e.stopPropagation(); im.x = 50; im.y = 50; im.z = 1; applyImg(el); touch(); } }),
+        h('button', '', { text: '자르기', onclick: async e => {
+          e.stopPropagation();
+          const r = await Crop.open(im, el.clientWidth / el.clientHeight);
+          if (r) { Object.assign(im, r); touch(); render(); }
+        } }),
         h('button', '', { text: '교체', onclick: async e => { e.stopPropagation(); const f = await pickImage(); if (f) setFile(f); } }),
         h('button', '', { text: '✕', title: '사진 지우기', onclick: e => { e.stopPropagation(); set(null); touch(); render(); } }),
       );
@@ -262,7 +273,7 @@
       el.addEventListener('pointerdown', e => {
         if (e.button !== 0) return;
         const W = el.clientWidth, H = el.clientHeight;
-        const base = fit === 'contain' ? Math.min(W / im.w, H / im.h) : Math.max(W / im.w, H / im.h);
+        const base = curFit() === 'contain' ? Math.min(W / im.w, H / im.h) : Math.max(W / im.w, H / im.h);
         const iw = im.w * base * im.z, ih = im.h * base * im.z;
         drag = { sx: e.clientX, sy: e.clientY, x: im.x, y: im.y, dW: W - iw, dH: H - ih };
         el.setPointerCapture(e.pointerId); el.classList.add('dragging');
@@ -280,13 +291,30 @@
     }
 
     // 파일 끌어다 놓기
+    // 붙여넣기 대상: 마우스가 올라가 있는 칸
+    el._setFile = setFile;
+    el.addEventListener('pointerenter', () => { hoverSlot = el; });
+    el.addEventListener('pointerleave', () => { if (hoverSlot === el) hoverSlot = null; });
     el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
     el.addEventListener('dragleave', () => el.classList.remove('over'));
     el.addEventListener('drop', e => {
       e.preventDefault(); el.classList.remove('over');
-      const f = e.dataTransfer.files[0]; if (f) setFile(f);
+      const f = e.dataTransfer.files[0];
+      if (f) return setFile(f);
+      const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+      if (url) fetchImage(url).then(setFile).catch(() => toast('이 사이트 사진은 바로 못 가져와요. 사진 우클릭 → ‘이미지 복사’ 후 붙여넣기 해 주세요'));
     });
-    return el;
+
+    // 출처(cr) 한 줄
+    const wrap = h('div', 'slot-wrap');
+    wrap.append(el);
+    if (im) {
+      const cr = h('div', 'cr');
+      cr.append(h('span', 'cr-p', { text: 'cr.' }));
+      cr.append(editable('span', 'cr-t', 'cr.' + Math.random().toString(36).slice(2, 8), '출처 (선택)', () => im.cr || '', v => { im.cr = v; }));
+      wrap.append(cr);
+    }
+    return wrap;
   }
 
   /* ---------------- 목록 (특징 / 특이사항) ---------------- */
@@ -518,6 +546,7 @@
         else { const num = li.querySelector('.num'); n++; if (num) { num.dataset.orig = num.textContent; num.textContent = `(${n})`; } }
       });
     });
+    sheet.querySelectorAll('.cr').forEach(cr => { if (!readText(cr.querySelector('.cr-t'))) hide(cr); });
     sheet.querySelectorAll('.meta-row').forEach(r => {
       if (!readText(r.querySelector('.k')) && !readText(r.querySelector('.v'))) hide(r);
     });
@@ -612,6 +641,138 @@
   };
 
   window.addEventListener('resize', layoutImages);
+
+  /* ---------------- 붙여넣기 ---------------- */
+  let hoverSlot = null;
+  async function fetchImage(url) {
+    const r = await fetch(url.trim(), { mode: 'cors' });
+    if (!r.ok) throw new Error('fetch');
+    const b = await r.blob();
+    if (!b.type.startsWith('image/')) throw new Error('not image');
+    return new File([b], 'pasted', { type: b.type });
+  }
+  document.addEventListener('paste', e => {
+    const cd = e.clipboardData; if (!cd) return;
+    const file = [...cd.files].find(f => f.type.startsWith('image/'))
+      || [...cd.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile())[0];
+    const text = cd.getData('text/plain').trim();
+    const isUrl = /^https?:\/\/\S+$/i.test(text) && !text.includes('\n');
+    const inText = document.activeElement && document.activeElement.isContentEditable;
+    if (!file && !(isUrl && hoverSlot && !inText)) return;
+    if (!hoverSlot) {
+      if (file) { e.preventDefault(); e.stopPropagation(); toast('사진을 넣을 칸 위에 마우스를 올려 두고 붙여넣기 해 주세요'); }
+      return;
+    }
+    e.preventDefault(); e.stopPropagation();
+    if (file) hoverSlot._setFile(file);
+    else fetchImage(text).then(hoverSlot._setFile).catch(() => toast('주소로는 못 가져오는 사진이에요. 우클릭 → ‘이미지 복사’로 다시 해 주세요'));
+  }, true);
+
+  /* ---------------- 자르기 ---------------- */
+  const Crop = (() => {
+    const back = h('div', 'crop-back');
+    back.innerHTML = `
+      <div class="crop-box">
+        <div class="crop-stage">
+          <img class="crop-img" alt="">
+          <div class="crop-rect"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div>
+        </div>
+        <div class="crop-bar">
+          <label><input type="checkbox" class="crop-lock"> 칸 비율에 맞추기</label>
+          <span class="crop-size"></span>
+          <span class="sp"></span>
+          <button data-a="all">원본 전체</button>
+          <button data-a="cancel">취소</button>
+          <button data-a="ok" class="primary">자르기</button>
+        </div>
+      </div>`;
+    document.body.append(back);
+    const img = $('.crop-img', back), rectEl = $('.crop-rect', back), stage = $('.crop-stage', back);
+    const lock = $('.crop-lock', back), sizeEl = $('.crop-size', back);
+    let dw, dh, k, aspect, r, resolve, orig;
+
+    const draw = () => {
+      Object.assign(rectEl.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+      sizeEl.textContent = `${Math.round(r.w * k)} × ${Math.round(r.h * k)}px`;
+    };
+    const fitAspect = () => {
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+      let w = r.w, hh = w / aspect;
+      if (hh > r.h) { hh = r.h; w = hh * aspect; }
+      r = { w, h: hh, x: Math.min(Math.max(0, cx - w / 2), dw - w), y: Math.min(Math.max(0, cy - hh / 2), dh - hh) };
+    };
+    lock.onchange = () => { if (lock.checked) { fitAspect(); draw(); } };
+
+    let drag = null;
+    rectEl.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      rectEl.setPointerCapture(e.pointerId);
+      drag = { hd: e.target.dataset.h || null, sx: e.clientX, sy: e.clientY, r0: { ...r } };
+    });
+    rectEl.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const { hd, r0 } = drag;
+      if (!hd) {
+        r.x = Math.min(Math.max(0, r0.x + e.clientX - drag.sx), dw - r.w);
+        r.y = Math.min(Math.max(0, r0.y + e.clientY - drag.sy), dh - r.h);
+      } else {
+        const sb = stage.getBoundingClientRect();
+        const px = Math.min(Math.max(0, e.clientX - sb.left), dw), py = Math.min(Math.max(0, e.clientY - sb.top), dh);
+        const dx = hd.includes('w') ? -1 : 1, dy = hd.includes('n') ? -1 : 1;
+        const ax = dx > 0 ? r0.x : r0.x + r0.w, ay = dy > 0 ? r0.y : r0.y + r0.h;
+        const availW = dx > 0 ? dw - ax : ax, availH = dy > 0 ? dh - ay : ay;
+        let w = Math.abs(px - ax), hh = Math.abs(py - ay);
+        if (lock.checked) { w = Math.min(Math.max(w, hh * aspect), availW, availH * aspect); hh = w / aspect; }
+        else { w = Math.min(w, availW); hh = Math.min(hh, availH); }
+        w = Math.max(w, 16); hh = Math.max(hh, 16);
+        r = { w, h: hh, x: dx > 0 ? ax : ax - w, y: dy > 0 ? ay : ay - hh };
+      }
+      draw();
+    });
+    const end = () => { drag = null; };
+    rectEl.addEventListener('pointerup', end);
+    rectEl.addEventListener('pointercancel', end);
+
+    const close = (val) => { back.classList.remove('show'); resolve && resolve(val); resolve = null; };
+    back.addEventListener('click', async e => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (e.target === back || a === 'cancel') return close(null);
+      if (a === 'all') { r = { x: 0, y: 0, w: dw, h: dh }; if (lock.checked) fitAspect(); draw(); }
+      if (a === 'ok') {
+        const src = { x: Math.round(r.x * k), y: Math.round(r.y * k), w: Math.max(1, Math.round(r.w * k)), h: Math.max(1, Math.round(r.h * k)) };
+        const cv = document.createElement('canvas'); cv.width = src.w; cv.height = src.h;
+        cv.getContext('2d').drawImage(img, src.x, src.y, src.w, src.h, 0, 0, src.w, src.h);
+        const png = orig.src.startsWith('data:image/png');
+        close({
+          orig, crop: src,
+          src: png ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.92),
+          w: src.w, h: src.h, x: 50, y: 50, z: 1,
+        });
+      }
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && back.classList.contains('show')) close(null); });
+
+    return {
+      open(im, slotAspect) {
+        return new Promise(res => {
+          resolve = res; aspect = slotAspect || 1;
+          orig = im.orig || { src: im.src, w: im.w, h: im.h };
+          img.onload = () => {
+            dw = img.clientWidth; dh = img.clientHeight; k = orig.w / dw;
+            stage.style.width = dw + 'px'; stage.style.height = dh + 'px';
+            const c = im.crop;
+            r = c ? { x: c.x / k, y: c.y / k, w: c.w / k, h: c.h / k } : { x: 0, y: 0, w: dw, h: dh };
+            draw();
+          };
+          stage.style.width = stage.style.height = '';
+          lock.checked = false;
+          back.classList.add('show');
+          img.src = orig.src;
+          if (img.complete && img.naturalWidth) img.onload();
+        });
+      },
+    };
+  })();
 
   /* ---------------- 시작 ---------------- */
   (async () => {
