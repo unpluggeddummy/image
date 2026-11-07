@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>외관 자료 메이커</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<aside class="panel">
+  <h1>외관 자료</h1>
+
+  <section>
+    <h2>캐릭터</h2>
+    <div id="charList" class="char-list"></div>
+    <div class="row">
+      <button id="btnNew">+ 새로 만들기</button>
+      <button id="btnDup">복제</button>
+      <button id="btnDel" class="danger">삭제</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>꾸미기</h2>
+    <label class="field">포인트 색 <input type="color" id="accent"></label>
+    <label class="field check"><input type="checkbox" id="preview"> 편집 표시 숨기고 미리보기</label>
+  </section>
+
+  <section>
+    <h2>저장</h2>
+    <button id="btnPng" class="primary">PNG로 저장</button>
+    <div class="row">
+      <button id="btnBackup">백업 내보내기</button>
+      <button id="btnRestore">백업 불러오기</button>
+    </div>
+    <input type="file" id="restoreInput" accept=".json,application/json" hidden>
+  </section>
+
+  <section class="help">
+    <h2>사용법</h2>
+    <ul>
+      <li>글자는 시트에서 바로 클릭해서 쓰기</li>
+      <li>목록에서 <b>Enter</b> = 새 줄 추가, 빈 줄에서 <b>Backspace</b> = 줄 삭제</li>
+      <li>사진 칸 클릭 또는 파일 끌어다 놓기</li>
+      <li>사진은 드래그로 위치 이동, <b>－ ＋</b>로 확대</li>
+      <li>색 칸을 누르면 색 선택</li>
+      <li>비어 있는 칸은 PNG에 안 나와요</li>
+    </ul>
+    <p class="warn">작업 내용은 <b>이 브라우저</b>에만 저장돼요. 다른 기기로 옮기거나 브라우저 기록을 지우기 전엔 ‘백업 내보내기’를 해 두세요.</p>
+  </section>
+</aside>
+
+<main class="stage">
+  <div id="sheet" class="sheet"></div>
+</main>
+
+<input type="file" id="imgInput" accept="image/*" hidden>
+<input type="color" id="colorInput" class="color-hidden">
+
+<script src="html2canvas.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
